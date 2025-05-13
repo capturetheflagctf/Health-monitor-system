@@ -1,0 +1,70 @@
+import streamlit as st
+import pyrebase
+from Crypto.Cipher import AES
+import base64
+import time
+
+# ------------------ Firebase Config -------------------
+firebaseConfig = {
+    "apiKey": "AIzaSyB-vvzoq6b0XYwF6i4TGBb5oAGtCg1tCyI",
+    "authDomain": "encryptedhealthdb-3b8b8.firebaseapp.com",
+    "databaseURL": "https://encryptedhealthdb-3b8b1-default-rtdb.asia-southeast1.firebasedatabase.app/",
+    "projectId": "encryptedhealthdb-3b8b8",
+    "storageBucket": "encryptedhealthdb-3b8b8.appspot.com",
+    "messagingSenderId": "927960891895",
+    "appId": "1:927960891895:web:79f3ef73c1cfc7d0e6eec9",
+    "measurementId": "G-W5D1HKTFMG"
+}
+
+firebase = pyrebase.initialize_app(firebaseConfig)
+db = firebase.database()
+
+# ------------------ AES Key Setup -------------------
+AES_KEY = bytes([
+    0x11, 0x2B, 0x3C, 0x4D,
+    0x5E, 0x6F, 0x70, 0x81,
+    0x92, 0xA3, 0xB4, 0xC5,
+    0xD6, 0xE7, 0xF8, 0x09
+])
+
+def decrypt_data(encoded_str):
+    try:
+        encrypted_data = base64.b64decode(encoded_str)
+        cipher = AES.new(AES_KEY, AES.MODE_ECB)
+        decrypted = cipher.decrypt(encrypted_data)
+        return decrypted.decode('utf-8', errors='ignore').replace('\x00', '').strip()
+    except:
+        return "Error"
+
+def show_dashboard():
+    st.set_page_config(page_title="Encrypted Health Dashboard", layout="centered")
+    st.title("🛡️ Encrypted Health Monitoring System")
+    st.caption("🔄 Auto-refresh every 5 seconds")
+
+    try:
+        encrypted_data = db.child("EncryptedHealth").get().val()
+        bpm = decrypt_data(encrypted_data.get("BPM", ""))
+        spo2 = decrypt_data(encrypted_data.get("SpO2", ""))
+        temp = decrypt_data(encrypted_data.get("Temperature", ""))
+        hum = decrypt_data(encrypted_data.get("Humidity", ""))
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("💓 Heart Rate")
+            st.success(f"{bpm} BPM")
+
+            st.subheader("🫁 SpO2")
+            st.info(f"{spo2} %")
+
+        with col2:
+            st.subheader("🌡️ Temperature")
+            st.warning(f"{temp} °C")
+
+            st.subheader("💧 Humidity")
+            st.error(f"{hum} %")
+
+    except Exception as e:
+        st.error(f"Error fetching/decrypting data: {e}")
+
+    time.sleep(10)
+    st.rerun()
