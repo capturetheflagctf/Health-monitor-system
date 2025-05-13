@@ -1,0 +1,109 @@
+#include <ESP8266WiFi.h>
+#include <FirebaseESP8266.h>
+#include <DHT.h>
+#include "Crypto.h"
+#include "AES.h"
+
+// WiFi credentials
+#define WIFI_SSID "cyberfi"
+#define WIFI_PASSWORD "capturetheflag"
+
+// Firebase credentials
+#define FIREBASE_HOST "https://encryptedhealthdb-3b8b1-default-rtdb.asia-southeast1.firebasedatabase.app/"
+#define FIREBASE_AUTH "Dz1HDiSxGiwygDOSlVnYhbwg1lNqNQQyLNFjCNSb"
+
+// DHT11 sensor
+#define DHTPIN D5
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+// Firebase objects
+FirebaseData firebaseData;
+FirebaseAuth auth;
+FirebaseConfig config;
+
+// AES 128-bit key (16 bytes)
+byte aesKey[16] = {
+  0x11, 0x2B, 0x3C, 0x4D,
+  0x5E, 0x6F, 0x70, 0x81,
+  0x92, 0xA3, 0xB4, 0xC5,
+  0xD6, 0xE7, 0xF8, 0x09
+};
+
+// Base64 encode manually
+const char b64_alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+String base64_encode(byte *data, int len) {
+  String encoded = "";
+  for (int i = 0; i < len; i += 3) {
+    int val = (data[i] << 16) + ((i + 1 < len ? data[i + 1] : 0) << 8) + (i + 2 < len ? data[i + 2] : 0);
+    encoded += b64_alphabet[(val >> 18) & 0x3F];
+    encoded += b64_alphabet[(val >> 12) & 0x3F];
+    encoded += (i + 1 < len) ? b64_alphabet[(val >> 6) & 0x3F] : '=';
+    encoded += (i + 2 < len) ? b64_alphabet[val & 0x3F] : '=';
+  }
+  return encoded;
+}
+
+// Encrypt + Encode
+String encryptAndEncode(String plainText) {
+  AES128 aes;
+  byte iv[16] = {0};  // Static IV
+  int inputLen = plainText.length();
+  int paddedLen = ((inputLen + 15) / 16) * 16;
+  byte plainBytes[paddedLen];
+  memset(plainBytes, 0, paddedLen);
+  memcpy(plainBytes, plainText.c_str(), inputLen);
+
+  byte encrypted[paddedLen];
+  aes.setKey(aesKey, aes.keySize());
+  for (int i = 0; i < paddedLen; i += 16) {
+    aes.encryptBlock(encrypted + i, plainBytes + i);
+  }
+
+  return base64_encode(encrypted, paddedLen);
+}
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println("\n✅ WiFi Connected!");
+
+  config.host = FIREBASE_HOST;
+  config.signer.tokens.legacy_token = FIREBASE_AUTH;
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+  dht.begin();
+}
+
+void loop() {
+  float temp = dht.readTemperature();
+  float hum = dht.readHumidity();
+  if (isnan(temp) || isnan(hum)) {
+    temp = random(36, 38);
+    hum = random(55, 70);
+  }
+
+  int bpm = random(72, 92);
+  int spo2 = random(95, 99);
+
+  Serial.printf("📡 BPM: %d | SpO2: %d | Temp: %.1f | Hum: %.1f\n", bpm, spo2, temp, hum);
+
+  // Encrypt and upload
+  String encBPM = encryptAndEncode(String(bpm));
+  String encSpO2 = encryptAndEncode(String(spo2));
+  String encTemp = encryptAndEncode(String(temp, 1));
+  String encHum = encryptAndEncode(String(hum, 1));
+
+  Firebase.setString(firebaseData, "/EncryptedHealth/BPM", encBPM);
+  Firebase.setString(firebaseData, "/EncryptedHealth/SpO2", encSpO2);
+  Firebase.setString(firebaseData, "/EncryptedHealth/Temperature", encTemp);
+  Firebase.setString(firebaseData, "/EncryptedHealth/Humidity", encHum);
+
+  delay(5000);  // Wait 5 seconds
+}
